@@ -48,3 +48,28 @@ python scripts/daily_review.py [日期] [--no-screen]
 | factors.py | 扩展因子库 |
 | scan.py | 原始扫描器 |
 | stock_data.py | 个股数据 |
+
+
+## 参考开源项目
+
+| 项目 | Stars | 引用技术 |
+|---|---|---|
+| vnpy/vnpy | 44k | 风控模块 + 事件驱动架构 |
+| freqtrade/freqtrade | 53k | 动态止损 + 策略API设计 |
+| QUANTAXIS/QUANTAXIS | 11k | 因子计算库 |
+| microsoft/qlib | 47k | AI因子挖掘 |
+| akshare/akshare | 22k | 数据源 |
+| tickflow-stock-panel | 2.4k | TickFlow资金流向可视化 |
+| KHunter | 336 | 涨停板策略回测框架 |
+| PureSaber/a-share-multifactor | - | 多因子IC分析 + 分位数回测 |
+
+## 开发路线图
+
+### v2.1 (计划中)
+- [ ] 多因子IC分析 (借鉴 PureSaber/a-share-multifactor)
+- [ ] 涨停板专项回测 (借鉴 KHunter)
+- [ ] TickFlow 资金流向可视化
+
+### v2.2 (计划中)
+- [ ] Qlib AI因子集成
+- [ ] Web Dashboard
