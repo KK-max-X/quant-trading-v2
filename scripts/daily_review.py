@@ -14,14 +14,12 @@ from datetime import datetime, timedelta
 import akshare as ak
 import pandas as pd
 import requests
-from risk_manager import MarketRegimeFilter, EquityTracker, equal_risk_size
-from factors import calc_rsi, calc_macd, calc_bollinger, calc_turnover_anomaly, calc_volume_divergence
 
 # ── Config ──────────────────────────────────────────────
 TODAY = datetime.now().strftime("%Y%m%d")
 OUT_DIR = os.path.dirname(os.path.abspath(__file__)) or "."
 
-VOL_LOOKBACK, VOL_RATIO, VOL_DAYS = 20, 2.0, 3
+VOL_LOOKBACK, VOL_RATIO, VOL_DAYS = 20, 2.0, 5
 MA_FAST, MA_SLOW = 5, 10
 LOOKBACK_START = "20260301"
 
@@ -459,7 +457,6 @@ def _load_industry_cache(end_date="20260722"):
                     INDUSTRY_CACHE[name] = False
             except:
                 INDUSTRY_CACHE[name] = False
-            time.sleep(0.05)
     except Exception:
         pass
 
@@ -514,11 +511,11 @@ def volume_boost_sustained(df):
     baseline = df["volume"].iloc[-(VOL_LOOKBACK + VOL_DAYS):-VOL_DAYS].mean()
     if baseline <= 0:
         return False, 0
-    for i in range(-VOL_DAYS, 0):
-        if df["volume"].iloc[i] < baseline * VOL_RATIO:
-            return False, 0
-    avg = sum(df["volume"].iloc[i] for i in range(-VOL_DAYS, 0)) / VOL_DAYS
-    return True, avg / baseline
+    window_avg = sum(df["volume"].iloc[i] for i in range(-VOL_DAYS, 0)) / VOL_DAYS
+    ratio = window_avg / baseline
+    if ratio >= VOL_RATIO:
+        return True, round(ratio, 2)
+    return False, 0
 
 def is_ma_uptrend(df, col="close"):
     if len(df) < MA_SLOW + 3:
@@ -533,7 +530,11 @@ def is_ma_uptrend(df, col="close"):
 def section_stock_screening(date_str):
     print(f"\n  六、放量涨停选股")
     print(f"  {'─' * 60}")
-    print(f"  条件: 近{VOL_DAYS}日持续放量>={VOL_RATIO}x + MA{MA_FAST}>MA{MA_SLOW}上升 + 至少1个涨停")
+    print(f"  策略1: 近{VOL_DAYS}日平均量翻倍>={VOL_RATIO}x + 至少1个涨停")
+    print(f"  策略2: 近{VOL_DAYS}日平均量翻倍>={VOL_RATIO}x + MA{MA_FAST}>MA{MA_SLOW}上升 + 至少1个涨停")
+
+    dt = datetime.strptime(date_str, "%Y%m%d")
+    lookback = (dt - timedelta(days=60)).strftime("%Y%m%d")
 
     _load_industry_cache(date_str)
     lhb = _get_lhb(date_str)
@@ -554,18 +555,16 @@ def section_stock_screening(date_str):
         return []
 
     print(f"  从 {len(symbols)} 只涨停股中筛选...")
-    results = []
+    s1_results = []
+    s2_results = []
     for i, sym in enumerate(symbols):
         if (i + 1) % 30 == 0:
             print(f"    进度: {i+1}/{len(symbols)} ...")
-        df = fetch_stock(sym, LOOKBACK_START, date_str)
+        df = fetch_stock(sym, lookback, date_str)
         if df is None or len(df) < VOL_LOOKBACK + VOL_DAYS:
             continue
         ok_vol, vr = volume_boost_sustained(df)
         if not ok_vol:
-            continue
-        ok_ma, sl = is_ma_uptrend(df)
-        if not ok_ma:
             continue
         name = ""; industry = ""
         try:
@@ -578,39 +577,51 @@ def section_stock_screening(date_str):
         sector_bonus = 1 if filter_sector_resonance(industry) else 0
         pattern = detect_pattern(df)
         lhb_bonus = sym in lhb_codes and lhb_data.get(sym, 0) > 0
-        results.append({"symbol": sym, "name": name, "industry": industry,
-                        "close": round(df.iloc[-1]["close"], 2),
-                        "vol_ratio": round(vr, 2),
-                        "pct_chg": round(df.iloc[-1].get("pct_chg", 0) or 0, 2),
-                        "trend_slope": round(sl, 4),
-                        "pattern": pattern,
-                        "sector_bonus": sector_bonus,
-                        "lhb_bonus": lhb_bonus})
+        pct = round(df.iloc[-1].get("pct_chg", 0) or 0, 2)
+
+        entry = {"symbol": sym, "name": name, "industry": industry,
+                 "close": round(df.iloc[-1]["close"], 2),
+                 "vol_ratio": round(vr, 2),
+                 "pct_chg": pct, "pattern": pattern,
+                 "sector_bonus": sector_bonus, "lhb_bonus": lhb_bonus}
+        s1_results.append(entry)
+
+        ok_ma, sl = is_ma_uptrend(df)
+        if ok_ma:
+            s2_results.append(dict(entry))
 
     print(f"\n  板块共振行业: {sum(1 for v in INDUSTRY_CACHE.values() if v)}/{len(INDUSTRY_CACHE)}")
     print(f"  龙虎榜数据: {'有' if lhb is not None and len(lhb) > 0 else '无'}")
-    print(f"  匹配: {len(results)} 只")
-    if results:
-        results.sort(key=lambda x: x["vol_ratio"] + x.get("sector_bonus",0)*2 + int(x.get("lhb_bonus",False))*3, reverse=True)
+
+    def print_section(title, items, prefix):
+        print(f"\n  [{title}] 匹配: {len(items)} 只")
+        if not items:
+            return
+        items.sort(key=lambda x: x["vol_ratio"] + x.get("sector_bonus",0)*2 + int(x.get("lhb_bonus",False))*3, reverse=True)
         print(f"  {'代码':<8} {'名称':<8} {'行业':<8} {'收盘':>7} {'量比':>6} {'形态':<14} {'板块':>4} {'龙虎':>4}")
         print(f"  {'─'*8} {'─'*8} {'─'*8} {'─'*7} {'─'*6} {'─'*14} {'─'*4} {'─'*4}")
-        for r in results:
+        for r in items:
             sec = "+" if r.get("sector_bonus") else ""
             lbh = "+" if r.get("lhb_bonus") else ""
             print(f"  {r['symbol']:<8} {r['name']:<8} {r['industry']:<8} "
                   f"{r['close']:>7.2f} {r['vol_ratio']:>5.2f}x "
                   f"{r['pattern']:<14} {sec:>4} {lbh:>4}")
-        csv_path = os.path.join(OUT_DIR, f"daily_picks_{date_str}.csv")
+        csv_path = os.path.join(OUT_DIR, f"{prefix}_{date_str}.csv")
         with open(csv_path, "w", newline="", encoding="utf-8-sig") as f:
-            w = csv.DictWriter(f, fieldnames=["symbol","name","industry","close","vol_ratio","pct_chg","trend_slope","pattern","sector_bonus","lhb_bonus"])
-            w.writeheader(); w.writerows(results)
+            w = csv.DictWriter(f, fieldnames=["symbol","name","industry","close","vol_ratio","pct_chg","pattern","sector_bonus","lhb_bonus"])
+            w.writeheader(); w.writerows(items)
         print(f"  -> {csv_path}")
-    return results
 
+    print_section("策略1", s1_results, "strategy1")
+    print_section("策略2", s2_results, "strategy2")
 
-# ═══════════════════════════════════════════════════════
-# SECTION 7: Prediction
-# ═══════════════════════════════════════════════════════
+    all_picks = s1_results + s2_results
+    csv_path = os.path.join(OUT_DIR, f"daily_picks_{date_str}.csv")
+    with open(csv_path, "w", newline="", encoding="utf-8-sig") as f:
+        w = csv.DictWriter(f, fieldnames=["symbol","name","industry","close","vol_ratio","pct_chg","pattern","sector_bonus","lhb_bonus"])
+        w.writeheader(); w.writerows(all_picks)
+    return all_picks
+
 
 def section_prediction(net_flow, up_count, down_count, zt_df, prev_net_flow=None, total_turnover=None, date_str=""):
     print("\n  七、明日预判")
@@ -841,59 +852,6 @@ def section_prediction(net_flow, up_count, down_count, zt_df, prev_net_flow=None
 
 
 # ═══════════════════════════════════════════════════════
-# SECTION 8: Risk Management
-# ═══════════════════════════════════════════════════════
-
-def section_risk_advice(score, max_score, picks, total_turnover, date_str):
-    """第八段: 风控建议 —— 基于市场环境 + 选股结果给出仓位和止损建议"""
-    print("\n  八、风控建议")
-    print(f"  {'─' * 60}")
-
-    regime = MarketRegimeFilter(score=score, max_score=max_score)
-    print(f"  市场评分: {score}/{max_score} ({score/max(max_score,1)*100:.0f}%)")
-    print(f"  仓位建议: {regime.advice()}")
-
-    # 选股风险提示
-    if picks:
-        print(f"\n  选股风控 ({len(picks)}只):")
-        for r in picks[:5]:
-            name = r.get("name", "?"); sym = r.get("symbol", "?")
-            pattern = r.get("pattern", "?")
-            sector = "+" if r.get("sector_bonus") else ""
-            lhb = "+" if r.get("lhb_bonus") else ""
-
-            # 风控判断
-            warnings = []
-            if pattern == "doji":
-                warnings.append("十字星-多空分歧, 设紧止损")
-            if not sector and not lhb:
-                warnings.append("无板块共振无龙虎, 仓位减半")
-            if r.get("vol_ratio", 0) > 4.0:
-                warnings.append("量比过高, 追高风险大")
-
-            risk = " | ".join(warnings) if warnings else "无特别风险"
-            bonus_str = f" 板块{sector} 龙虎{lhb}" if sector or lhb else ""
-            print(f"  {sym:<8} {name:<8} {risk}{' ' + bonus_str if bonus_str else ''}")
-    else:
-        print(f"\n  今日无选股, 建议观望")
-
-    # 大盘风险
-    print(f"\n  大盘风控:")
-    if total_turnover:
-        print(f"  全市场成交额: {total_turnover:.0f} 亿")
-
-    score_pct = score / max(max_score, 1) * 100
-    if score_pct < 35:
-        print(f"  建议: 空仓或不超过2成仓位, 等待市场回暖信号")
-    elif score_pct < 55:
-        print(f"  建议: 3-4成仓位, 单票不超过总资金15%, 严格设止损")
-    else:
-        print(f"  建议: 5-7成仓位, 分散到3-5只票, 单票止损5%以内")
-
-    return regime
-
-
-# ═══════════════════════════════════════════════════════
 # MAIN
 # ═══════════════════════════════════════════════════════
 
@@ -924,17 +882,13 @@ def main():
     zt_df = section_limit_up(date_str)
 
     # 6
-    picks = []
     if not args.no_screen:
-        picks = section_stock_screening(date_str)
+        section_stock_screening(date_str)
     else:
         print("\n  六、选股扫描 - 已跳过 (--no-screen)")
 
     # 7
-    score, max_score = section_prediction(net_flow, up_count, down_count, zt_df, prev_net_flow, total_turnover, date_str)
-
-    # 8
-    section_risk_advice(score, max_score, picks, total_turnover, date_str)
+    section_prediction(net_flow, up_count, down_count, zt_df, prev_net_flow, total_turnover, date_str)
 
     elapsed = time.time() - t0
     print(f"\n{'=' * 72}")

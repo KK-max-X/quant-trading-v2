@@ -1,0 +1,4 @@
+﻿symbol,name,industry,close,vol_ratio,pct_chg,trend_slope,pattern,sector_bonus,lhb_bonus
+603580,艾艾精工,塑料,52.7,2.23,10.0,0.1159,limit_up,0,True
+605162,新中港,电力,9.23,4.35,10.01,0.0864,limit_up,0,False
+002199,东晶电子,元件,12.17,3.46,10.04,0.0509,limit_up,0,False

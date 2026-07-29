@@ -109,7 +109,6 @@ def load_industry_cache(end_date="20260722"):
                 else:
                     INDUSTRY_CACHE[name] = False
             except: INDUSTRY_CACHE[name] = False
-            time.sleep(0.05)
         up = sum(1 for v in INDUSTRY_CACHE.values() if v)
         trending_names = [k for k, v in INDUSTRY_CACHE.items() if v]
         print(f"  行业趋势: {up}/{len(INDUSTRY_CACHE)} 个上升: " + ", ".join(trending_names))
@@ -399,8 +398,10 @@ def daily_screen(date_str):
 
     print(f"\n匹配: {len(results)} 只")
     if results:
-        print(f"  {"代码":<8} {"名称":<8} {"行业":<10} {"收盘":>7} {"量比":>6} {"形态":<18} {"板块":>4} {"龙虎":>4}")
-        print(f"  {"-"*8} {"-"*8} {"-"*10} {"-"*7} {"-"*6} {"-"*18} {"-"*4} {"-"*4}")
+        h1 = "  {:<8} {:<8} {:<10} {:>7} {:>6} {:<18} {:>4} {:>4}".format("代码","名称","行业","收盘","量比","形态","板块","龙虎")
+        h2 = "  {:<8} {:<8} {:<10} {:>7} {:>6} {:<18} {:>4} {:>4}".format("-"*8,"-"*8,"-"*10,"-"*7,"-"*6,"-"*18,"-"*4,"-"*4)
+        print(h1 + "\n" + h2)
+        print(h2)
         for r in results[:30]:
             sec = "+" if r.get("sector_bonus") else ""
             lbh = "+" if r.get("lhb_bonus") else ""
