@@ -179,7 +179,7 @@ def _get_ths_sector():
         return _THS_SECTOR_CACHE
     _THS_SECTOR_CACHE = ak.stock_board_industry_summary_ths()
     return _THS_SECTOR_CACHE
-def section_market_overview(date_str):
+def section_market_overview(date_str, manual_turnover=None):
     global _SSE_DF_CACHE
     print("\n" + "=" * 72)
     print(f"  [A股每日复盘] {date_str}")
@@ -239,7 +239,7 @@ def section_market_overview(date_str):
             tag = "+" if chg > 0 else ("-" if chg < 0 else " ")
             ma5_tag = "+" if close > ma5 else "-"
             ma10_tag = "+" if ma5 > ma10 else "-"
-            print(f"  [{tag}] {name:<6}  {close:>8.2f}  {chg:>+6.2f}%  {vol_yi:>10.2f}  "
+            print(f"  [{tag}] {name:<6}  {close:>8.2f}  {chg:>+6.2f}%  {'—':>10}  "
                   f"[{ma5_tag}]{ma5:>7.0f}  [{ma10_tag}]{ma10:>7.0f}")
             index_data[name] = {"close": close, "chg": chg, "vol": vol_yi, "ma5": ma5, "ma10": ma10}
         except Exception as e:
@@ -250,10 +250,18 @@ def section_market_overview(date_str):
     try:
         df_ths = _get_ths_sector()
         total_turnover = df_ths["总成交额"].sum()
-        print(f"  全市场成交额: {total_turnover:.0f} 亿 (同花顺)")
+    print(f"  全市场成交额: {total_turnover:.0f} 亿 (同花顺)")
+    if manual_turnover is not None:
+        total_turnover_before = total_turnover
+        total_turnover = manual_turnover
+        print(f"  → 手动覆盖为: {total_turnover:.0f} 亿 (用户输入)")
     except Exception:
         total_turnover = None
-        print(f"  全市场成交额: 暂无法获取")
+        if manual_turnover is not None:
+            total_turnover = manual_turnover
+            print(f"  全市场成交额: {total_turnover:.0f} 亿 (用户输入)")
+        else:
+            print(f"  全市场成交额: 暂无法获取")
 
     # 数据校验: 与昨日缓存对比
     # 交叉校验: EM 成交额 vs THS 全市场成交额
@@ -1034,6 +1042,7 @@ def main():
     parser = argparse.ArgumentParser(description="A股每日复盘工具 v2")
     parser.add_argument("date", nargs="?", default=None, help="复盘日期 YYYYMMDD")
     parser.add_argument("--no-screen", action="store_true", help="跳过选股扫描")
+    parser.add_argument("--turnover", type=float, default=None, help="同花顺客户端全市场成交额(亿), 覆盖THS估算值")
     args = parser.parse_args()
 
     date_str = latest_trading_day(args.date)
@@ -1041,7 +1050,7 @@ def main():
     t0 = time.time()
 
     # 1
-    _, total_turnover = section_market_overview(date_str)
+    _, total_turnover = section_market_overview(date_str, args.turnover)
 
     # 2
     net_flow, prev_net_flow = section_capital_flow()
