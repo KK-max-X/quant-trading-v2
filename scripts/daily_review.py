@@ -233,7 +233,7 @@ def section_market_overview(date_str):
             row = df.iloc[-1]; prev = df.iloc[-2]
             close = row["close"]
             chg = (close / prev["close"] - 1) * 100
-            vol_yi = row["volume"] / 1e8
+            vol_yi = row["amount"] / 1e8 if "amount" in df.columns else row["volume"] / 1e8
             ma5 = df["close"].rolling(MA_FAST).mean().iloc[-1]
             ma10 = df["close"].rolling(MA_SLOW).mean().iloc[-1]
             tag = "+" if chg > 0 else ("-" if chg < 0 else " ")
@@ -254,6 +254,45 @@ def section_market_overview(date_str):
     except Exception:
         total_turnover = None
         print(f"  全市场成交额: 暂无法获取")
+
+    # 数据校验: 与昨日缓存对比
+    # 交叉校验: EM 成交额 vs THS 全市场成交额
+    em_total = sum(v.get("vol", 0) for v in index_data.values())
+    if total_turnover and em_total > 0 and total_turnover > 0:
+        ratio = em_total / total_turnover
+        if ratio < 0.3 or ratio > 3.0:
+            print(f"  ⚠ 数据源不一致: EM指数成交额合计{em_total:.0f}亿 vs THS全市场{total_turnover:.0f}亿 (比值{ratio:.2f})")
+
+    try:
+        cache_path = os.path.join(OUT_DIR, "index_cache.txt")
+        if os.path.exists(cache_path):
+            with open(cache_path, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+            if len(lines) >= 1:
+                last_line = lines[-1].strip().split(",")
+                if len(last_line) >= 5 and last_line[0] != date_str:
+                    yest_sh = float(last_line[1])
+                    today_sh = index_data.get("上证指数", {}).get("close", 0)
+                    if today_sh > 0 and yest_sh > 0:
+                        pct = abs(today_sh / yest_sh - 1) * 100
+                        if pct > 10:
+                            print(f"  ⚠ 数据异常: 上证单日变动 {pct:.1f}%, 请核实数据源")
+                        elif pct < 0.01 and date_str != last_line[0]:
+                            print(f"  ⚠ 数据可能未更新: 上证收盘与昨日相同")
+    except Exception:
+        pass
+
+    # 保存今日数据供下次校验
+    try:
+        sh = index_data.get("上证指数", {}).get("close", 0)
+        sz = index_data.get("深证成指", {}).get("close", 0)
+        if sh > 0:
+            cache_path = os.path.join(OUT_DIR, "index_cache.txt")
+            with open(cache_path, "a", encoding="utf-8") as f:
+                f.write(f"{date_str},{sh},{sz},{total_turnover or 0}\n")
+    except Exception:
+        pass
+
     return index_data, total_turnover
     return index_data, total_turnover
 
