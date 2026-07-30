@@ -632,9 +632,6 @@ def section_stock_screening(date_str):
     dt = datetime.strptime(date_str, "%Y%m%d")
     lookback = (dt - timedelta(days=60)).strftime("%Y%m%d")
 
-    print(f"\n  六、放量涨停选股")
-    print(f"  {'─' * 60}")
-    print(f"  市场环境: {qs}/{qs_max}分 ({qs/max(qs_max,1)*100:.0f}%)")
     print(f"  策略1: 近{VOL_DAYS}日日环比放量>={VOL_RATIO}x + 至少1个涨停")
     print(f"  策略2: 近{VOL_DAYS}日持续放量>={VOL_RATIO}x(20日均线) + MA{MA_FAST}>MA{MA_SLOW}上升 + 至少1个涨停")
 
@@ -688,24 +685,25 @@ def section_stock_screening(date_str):
         lhb_bonus = sym in lhb_codes and lhb_data.get(sym, 0) > 0
         pct = round(df.iloc[-1].get("pct_chg", 0) or 0, 2)
         ma5 = df["close"].rolling(5).mean().iloc[-1]
-        comp = composite_score(vr_v1, sector_bonus, lhb_bonus, pattern, df.iloc[-1]["close"], ma5)
 
         if ok_v1:
+            comp1 = composite_score(vr_v1, sector_bonus, lhb_bonus, pattern, df.iloc[-1]["close"], ma5)
             entry = {"symbol": sym, "name": name, "industry": industry,
                      "close": round(df.iloc[-1]["close"], 2),
                      "vol_ratio": round(vr_v1, 2), "pct_chg": pct,
                      "pattern": pattern, "sector_bonus": sector_bonus,
-                     "lhb_bonus": lhb_bonus, "composite": comp}
+                     "lhb_bonus": lhb_bonus, "composite": comp1}
             s1_results.append(entry)
 
         if ok_v2:
             ok_ma, sl = is_ma_uptrend(df)
             if ok_ma:
+                comp2 = composite_score(vr_v2, sector_bonus, lhb_bonus, pattern, df.iloc[-1]["close"], ma5)
                 s2_results.append({"symbol": sym, "name": name, "industry": industry,
                                   "close": round(df.iloc[-1]["close"], 2),
                                   "vol_ratio": round(vr_v2, 2), "pct_chg": pct,
                                   "pattern": pattern, "sector_bonus": sector_bonus,
-                                  "lhb_bonus": lhb_bonus, "composite": comp})
+                                  "lhb_bonus": lhb_bonus, "composite": comp2})
 
     print(f"\n  板块共振行业: {sum(1 for v in INDUSTRY_CACHE.values() if v)}/{len(INDUSTRY_CACHE)}")
     print(f"  龙虎榜数据: {'有' if lhb is not None and len(lhb) > 0 else '无'}")
@@ -725,8 +723,8 @@ def section_stock_screening(date_str):
                   f"{r['pattern']:<14} {sec:>4} {lbh:>4}")
         csv_path = os.path.join(OUT_DIR, f"{prefix}_{date_str}.csv")
         with open(csv_path, "w", newline="", encoding="utf-8-sig") as f:
-            w = csv.DictWriter(f, fieldnames=["symbol","name","industry","close","vol_ratio","pct_chg","pattern","sector_bonus","lhb_bonus"])
-            w.writeheader(); w.writerows(items)
+              w = csv.DictWriter(f, fieldnames=["symbol","name","industry","close","vol_ratio","pct_chg","pattern","sector_bonus","lhb_bonus","composite"])
+              w.writeheader(); w.writerows(items)
         print(f"  -> {csv_path}")
 
     print_section("策略1", s1_results, "strategy1")
@@ -756,7 +754,7 @@ def section_stock_screening(date_str):
     all_picks = s1_results + s2_results
     csv_path = os.path.join(OUT_DIR, f"daily_picks_{date_str}.csv")
     with open(csv_path, "w", newline="", encoding="utf-8-sig") as f:
-        w = csv.DictWriter(f, fieldnames=["symbol","name","industry","close","vol_ratio","pct_chg","pattern","sector_bonus","lhb_bonus"])
+        w = csv.DictWriter(f, fieldnames=["symbol","name","industry","close","vol_ratio","pct_chg","pattern","sector_bonus","lhb_bonus","composite"])
         w.writeheader(); w.writerows(all_picks)
     return all_picks
 
@@ -1023,10 +1021,12 @@ def main():
     qs, qs_max = quick_market_score(net_flow, up_count, down_count, zt_df)
 
     # 6
-    if qs < 4 and not args.no_screen:
+    if not args.no_screen:
         print(f"\n  六、放量涨停选股")
         print(f"  {'─' * 60}")
-        print(f"  市场环境: {qs}/{qs_max}分 ({qs/max(qs_max,1)*100:.0f}%) — 评分不足，自动跳过选股")
+        print(f"  市场环境: {qs}/{qs_max}分 ({qs/max(qs_max,1)*100:.0f}%)")
+    if qs < 4 and not args.no_screen:
+        print(f"  评分不足，自动跳过选股")
         print(f"  触发规则: 评分 < 4/13 时暂停筛选，等待市场回暖")
         picks = []
     else:
