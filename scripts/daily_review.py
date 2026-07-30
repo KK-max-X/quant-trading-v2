@@ -506,16 +506,34 @@ def detect_pattern(df):
 
 
 def volume_boost_sustained(df):
+    """策略1: 近5日日环比放量翻倍"""
+    if len(df) < VOL_DAYS + 1:
+        return False, 0
+    best_ratio = 0
+    for i in range(-VOL_DAYS + 1, 0):
+        curr = df["volume"].iloc[i]
+        prev = df["volume"].iloc[i - 1]
+        if prev <= 0: continue
+        ratio = curr / prev
+        if ratio > best_ratio:
+            best_ratio = ratio
+    if best_ratio >= VOL_RATIO:
+        return True, round(best_ratio, 2)
+    return False, 0
+
+
+def volume_boost_sustained_v2(df):
+    """策略2: 近5日持续放量 >= 2x 20日均线"""
     if len(df) < VOL_LOOKBACK + VOL_DAYS:
         return False, 0
     baseline = df["volume"].iloc[-(VOL_LOOKBACK + VOL_DAYS):-VOL_DAYS].mean()
     if baseline <= 0:
         return False, 0
-    window_avg = sum(df["volume"].iloc[i] for i in range(-VOL_DAYS, 0)) / VOL_DAYS
-    ratio = window_avg / baseline
-    if ratio >= VOL_RATIO:
-        return True, round(ratio, 2)
-    return False, 0
+    for i in range(-VOL_DAYS, 0):
+        if df["volume"].iloc[i] < baseline * VOL_RATIO:
+            return False, 0
+    avg = sum(df["volume"].iloc[i] for i in range(-VOL_DAYS, 0)) / VOL_DAYS
+    return True, round(avg / baseline, 2)
 
 def is_ma_uptrend(df, col="close"):
     if len(df) < MA_SLOW + 3:
@@ -530,8 +548,8 @@ def is_ma_uptrend(df, col="close"):
 def section_stock_screening(date_str):
     print(f"\n  六、放量涨停选股")
     print(f"  {'─' * 60}")
-    print(f"  策略1: 近{VOL_DAYS}日平均量翻倍>={VOL_RATIO}x + 至少1个涨停")
-    print(f"  策略2: 近{VOL_DAYS}日平均量翻倍>={VOL_RATIO}x + MA{MA_FAST}>MA{MA_SLOW}上升 + 至少1个涨停")
+    print(f"  策略1: 近{VOL_DAYS}日日环比放量>={VOL_RATIO}x + 至少1个涨停")
+    print(f"  策略2: 近{VOL_DAYS}日持续放量>={VOL_RATIO}x(20日均线) + MA{MA_FAST}>MA{MA_SLOW}上升 + 至少1个涨停")
 
     dt = datetime.strptime(date_str, "%Y%m%d")
     lookback = (dt - timedelta(days=60)).strftime("%Y%m%d")
@@ -563,9 +581,13 @@ def section_stock_screening(date_str):
         df = fetch_stock(sym, lookback, date_str)
         if df is None or len(df) < VOL_LOOKBACK + VOL_DAYS:
             continue
-        ok_vol, vr = volume_boost_sustained(df)
-        if not ok_vol:
+        # 策略1: 日环比
+        ok_v1, vr_v1 = volume_boost_sustained(df)
+        # 策略2: 20日均线
+        ok_v2, vr_v2 = volume_boost_sustained_v2(df)
+        if not ok_v1 and not ok_v2:
             continue
+
         name = ""; industry = ""
         try:
             m = zt[zt["代码"] == sym]
@@ -579,16 +601,22 @@ def section_stock_screening(date_str):
         lhb_bonus = sym in lhb_codes and lhb_data.get(sym, 0) > 0
         pct = round(df.iloc[-1].get("pct_chg", 0) or 0, 2)
 
-        entry = {"symbol": sym, "name": name, "industry": industry,
-                 "close": round(df.iloc[-1]["close"], 2),
-                 "vol_ratio": round(vr, 2),
-                 "pct_chg": pct, "pattern": pattern,
-                 "sector_bonus": sector_bonus, "lhb_bonus": lhb_bonus}
-        s1_results.append(entry)
+        if ok_v1:
+            entry = {"symbol": sym, "name": name, "industry": industry,
+                     "close": round(df.iloc[-1]["close"], 2),
+                     "vol_ratio": round(vr_v1, 2), "pct_chg": pct,
+                     "pattern": pattern, "sector_bonus": sector_bonus,
+                     "lhb_bonus": lhb_bonus}
+            s1_results.append(entry)
 
-        ok_ma, sl = is_ma_uptrend(df)
-        if ok_ma:
-            s2_results.append(dict(entry))
+        if ok_v2:
+            ok_ma, sl = is_ma_uptrend(df)
+            if ok_ma:
+                s2_results.append({"symbol": sym, "name": name, "industry": industry,
+                                  "close": round(df.iloc[-1]["close"], 2),
+                                  "vol_ratio": round(vr_v2, 2), "pct_chg": pct,
+                                  "pattern": pattern, "sector_bonus": sector_bonus,
+                                  "lhb_bonus": lhb_bonus})
 
     print(f"\n  板块共振行业: {sum(1 for v in INDUSTRY_CACHE.values() if v)}/{len(INDUSTRY_CACHE)}")
     print(f"  龙虎榜数据: {'有' if lhb is not None and len(lhb) > 0 else '无'}")

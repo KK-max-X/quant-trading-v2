@@ -16,7 +16,7 @@ import requests
 
 # ========== 配置 ==========
 HOLD_DAYS = 5
-VOL_LOOKBACK, VOL_RATIO, VOL_DAYS = 20, 2.0, 3
+VOL_LOOKBACK, VOL_RATIO, VOL_DAYS = 20, 2.0, 5
 
 INDUSTRY_CACHE = {}
 THS_INDUSTRIES = None
@@ -123,15 +123,19 @@ def filter_st_exclude(name, code):
     return "ST" not in n and "*ST" not in n and code not in n
 
 def filter_volume_boost(df):
-    if len(df) < VOL_LOOKBACK + VOL_DAYS:
+    if len(df) < VOL_DAYS + 1:
         return False, 0
-    baseline = df["volume"].iloc[-(VOL_LOOKBACK+VOL_DAYS):-VOL_DAYS].mean()
-    if baseline <= 0: return False, 0
-    for i in range(-VOL_DAYS, 0):
-        if df["volume"].iloc[i] < baseline * VOL_RATIO:
-            return False, 0
-    avg = sum(df["volume"].iloc[i] for i in range(-VOL_DAYS, 0)) / VOL_DAYS
-    return True, avg / baseline
+    best_ratio = 0
+    for i in range(-VOL_DAYS + 1, 0):
+        curr = df["volume"].iloc[i]
+        prev = df["volume"].iloc[i - 1]
+        if prev <= 0: continue
+        ratio = curr / prev
+        if ratio > best_ratio:
+            best_ratio = ratio
+    if best_ratio >= VOL_RATIO:
+        return True, round(best_ratio, 2)
+    return False, 0
 
 def filter_ma_uptrend(df):
     """均线: MA5 > MA10 且双均线斜率向上"""
