@@ -196,32 +196,10 @@ def section_market_overview(date_str, manual_turnover=None):
     total_turnover = None
     for name, code in indices.items():
         try:
-            em_code = code
             try:
-                url = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
-                params = {"secid": f"1.{em_code[2:]}", "fields1": "f1,f2,f3,f4,f5",
-                          "fields2": "f51,f52,f53,f54,f55,f56,f57",
-                          "klt": "101", "fqt": "0", "beg": "20260101", "end": "20261231"}
-                data = em_get(url, params)
-                if data and data.get("klines"):
-                    rows = []
-                    for line in data["klines"]:
-                        parts = line.split(",")
-                        rows.append({"date": pd.to_datetime(parts[0]), "open": float(parts[1]),
-                                     "close": float(parts[2]), "high": float(parts[3]),
-                                     "low": float(parts[4]), "volume": float(parts[5]),
-                                     "amount": float(parts[6])})
-                    df = pd.DataFrame(rows).set_index("date").sort_index()
-                else:
-                    raise RuntimeError("EM empty")
+                df = ak.stock_zh_index_daily_tx(symbol=code)
             except:
-                try:
-                    df = ak.stock_zh_index_daily_tx(symbol=code)
-                except:
-                    df = ak.stock_zh_index_daily(symbol=code)
-                if "date" not in df.columns:
-                    df.rename(columns={df.columns[0]: "date"}, inplace=True)
-                df["date"] = pd.to_datetime(df["date"]); df.set_index("date", inplace=True)
+                df = ak.stock_zh_index_daily(symbol=code)
             if name == "上证指数" and _SSE_DF_CACHE is None:
                 _SSE_DF_CACHE = df.copy()
             if len(df) < 2:
@@ -239,7 +217,7 @@ def section_market_overview(date_str, manual_turnover=None):
             tag = "+" if chg > 0 else ("-" if chg < 0 else " ")
             ma5_tag = "+" if close > ma5 else "-"
             ma10_tag = "+" if ma5 > ma10 else "-"
-            print(f"  [{tag}] {name:<6}  {close:>8.2f}  {chg:>+6.2f}%  {'—':>10}  "
+            print(f"  [{tag}] {name:<6}  {close:>8.2f}  {chg:>+6.2f}%  {vol_yi:>10.2f}  "
                   f"[{ma5_tag}]{ma5:>7.0f}  [{ma10_tag}]{ma10:>7.0f}")
             index_data[name] = {"close": close, "chg": chg, "vol": vol_yi, "ma5": ma5, "ma10": ma10}
         except Exception as e:
@@ -250,11 +228,10 @@ def section_market_overview(date_str, manual_turnover=None):
     try:
         df_ths = _get_ths_sector()
         total_turnover = df_ths["总成交额"].sum()
-    print(f"  全市场成交额: {total_turnover:.0f} 亿 (同花顺)")
-    if manual_turnover is not None:
-        total_turnover_before = total_turnover
-        total_turnover = manual_turnover
-        print(f"  → 手动覆盖为: {total_turnover:.0f} 亿 (用户输入)")
+        print(f"  全市场成交额: {total_turnover:.0f} 亿 (同花顺)")
+        if manual_turnover is not None:
+            total_turnover = manual_turnover
+            print(f"  → 手动覆盖为: {total_turnover:.0f} 亿 (用户输入)")
     except Exception:
         total_turnover = None
         if manual_turnover is not None:
