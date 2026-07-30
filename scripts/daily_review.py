@@ -911,12 +911,12 @@ def main():
 
     # 6
     if not args.no_screen:
-        section_stock_screening(date_str)
+        picks = section_stock_screening(date_str)
     else:
         print("\n  六、选股扫描 - 已跳过 (--no-screen)")
 
     # 7
-    section_prediction(net_flow, up_count, down_count, zt_df, prev_net_flow, total_turnover, date_str)
+    score, max_score = section_prediction(net_flow, up_count, down_count, zt_df, prev_net_flow, total_turnover, date_str)
 
     elapsed = time.time() - t0
     print(f"\n{'=' * 72}")
