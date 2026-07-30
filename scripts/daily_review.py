@@ -731,6 +731,18 @@ def section_stock_screening(date_str):
 
     print_section("策略1", s1_results, "strategy1")
     print_section("策略2", s2_results, "strategy2")
+    # 仓位建议 + 止损价
+    if s2_results:
+        s2_sorted = sorted(s2_results, key=lambda x: x.get("composite", 0), reverse=True)
+        print(f"\n  ── 操作建议 (基于100,000本金) ──")
+        print(f"  {'代码':<8} {'名称':<8} {'现价':>7} {'建议股数':>7} {'买入金额':>9} {'硬止损':>7} {'MA5止损':>7}")
+        print(f"  {'─'*8} {'─'*8} {'─'*7} {'─'*7} {'─'*9} {'─'*7} {'─'*7}")
+        for r in s2_sorted[:5]:
+            price = r["close"]; shares = int(15000 / price / 100) * 100
+            amount = shares * price; hard_sl = round(price * 0.95, 2)
+            ma5_sl = "—"  # 需要实时MA5, 这里用收盘价代替
+            print(f"  {r['symbol']:<8} {r['name']:<8} {price:>7.2f} {shares:>7} {amount:>9.0f} {hard_sl:>7.2f} {ma5_sl:>7}")
+
     if s2_results:
         s3 = sorted(s2_results, key=lambda x: x.get("composite", 0), reverse=True)
         print(f"\n  [策略3] 综合合成排名 (因子加权得分)")
@@ -1011,11 +1023,18 @@ def main():
     qs, qs_max = quick_market_score(net_flow, up_count, down_count, zt_df)
 
     # 6
-    picks = []
-    if not args.no_screen:
-        picks = section_stock_screening(date_str)
+    if qs < 4 and not args.no_screen:
+        print(f"\n  六、放量涨停选股")
+        print(f"  {'─' * 60}")
+        print(f"  市场环境: {qs}/{qs_max}分 ({qs/max(qs_max,1)*100:.0f}%) — 评分不足，自动跳过选股")
+        print(f"  触发规则: 评分 < 4/13 时暂停筛选，等待市场回暖")
+        picks = []
     else:
-        print("\n  六、选股扫描 - 已跳过 (--no-screen)")
+        picks = []
+        if not args.no_screen:
+            picks = section_stock_screening(date_str)
+        else:
+            print("\n  六、选股扫描 - 已跳过 (--no-screen)")
 
     # 7
     score, max_score = section_prediction(net_flow, up_count, down_count, zt_df, prev_net_flow, total_turnover, date_str)
