@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 A股每日复盘工具 v2
 ==============
@@ -599,6 +599,33 @@ def composite_score(vol_ratio, sector_bonus, lhb_bonus, pattern, close, ma5_val)
     else:
         s_ma = 0
     return round((w_vol*s_vol + w_lhb*s_lhb + w_sector*s_sector + w_pattern*s_pattern + w_ma*s_ma) * 100, 1)
+
+
+def stock_defuse_check(df):
+    """排雷三振: 30天内连续跌停 / MACD死叉 / MA20斜率向下. 任一命中返回(False, 原因)"""
+    # 1. 连续跌停检测 (30天内)
+    recent = df.tail(30) if len(df) >= 30 else df
+    pct = recent["pct_chg"] if "pct_chg" in recent.columns else recent["close"].pct_change() * 100
+    streak = 0
+    for i in range(-min(len(recent), 30), 0):
+        if pct.iloc[i] <= -9.5:
+            streak += 1
+            if streak >= 2:
+                return False, "30天内有连续跌停"
+        else:
+            streak = 0
+    # 2. MACD死叉
+    ema12 = df["close"].ewm(span=12).mean(); ema26 = df["close"].ewm(span=26).mean()
+    dif = ema12.iloc[-1] - ema26.iloc[-1]; dea = (dif + ema12.iloc[-2] - ema26.iloc[-2]) / 2 if len(ema12) >= 2 else dif
+    if dif <= dea:
+        return False, "MACD死叉"
+    # 3. MA20斜率向下
+    if len(df) >= 25:
+        ma20 = df["close"].rolling(20).mean()
+        slope = (ma20.iloc[-1] - ma20.iloc[-5]) / max(abs(ma20.iloc[-5]), 0.01)
+        if slope <= 0:
+            return False, "MA20斜率向下"
+    return True, "通过"
 
 
 def section_stock_screening(date_str):
