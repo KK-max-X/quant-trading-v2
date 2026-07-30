@@ -83,6 +83,42 @@ def limit_pct(symbol):
 def sep(title=""):
     print(f"\n  {'─' * 60}" if not title else f"\n  {'─' * 60}\n  {title}")
 
+def quick_market_score(net_flow, up_count, down_count, zt_df):
+    """市场环境快速评分 (0-13分)——在第六段选股前调用"""
+    score, max_s = 0, 13
+    signals = []
+    # 资金 (0-3)
+    if net_flow is not None:
+        if net_flow > 100: score += 3
+        elif net_flow > 0: score += 2
+        elif net_flow > -100: score += 1
+    # 行业广度 (0-3)
+    total = up_count + down_count
+    if total > 0:
+        r = up_count / total
+        if r > 0.75: score += 3
+        elif r > 0.55: score += 2
+        elif r > 0.35: score += 1
+    # 涨停数量 (0-3)
+    zc = len(zt_df) if zt_df is not None else 0
+    if zc >= 120: score += 3
+    elif zc >= 80: score += 2
+    elif zc >= 40: score += 1
+    # 连板高度 (0-2)
+    if zt_df is not None and "连板数" in zt_df.columns:
+        mb = int(zt_df["连板数"].max())
+        if mb >= 6: score += 2
+        elif mb >= 4: score += 1
+    # 指数 (0-2)
+    try:
+        idx = ak.stock_zh_index_daily(symbol="sh000001")
+        ma5 = idx["close"].rolling(5).mean().iloc[-1]
+        if idx.iloc[-1]["close"] > ma5: score += 2
+        elif idx.iloc[-1]["close"] > idx.iloc[-2]["close"]: score += 1
+    except: pass
+    return score, max_s
+
+
 # ═══════════════════════════════════════════════════════
 # SECTION 1: Market Overview
 # ═══════════════════════════════════════════════════════
@@ -545,9 +581,33 @@ def is_ma_uptrend(df, col="close"):
     slope = (ma_f.iloc[-1] - ma_f.iloc[-3]) / max(abs(ma_f.iloc[-3]), 0.01)
     return True, slope
 
+def composite_score(vol_ratio, sector_bonus, lhb_bonus, pattern, close, ma5_val):
+    """综合因子得分 (0-100)——所有因子加权合成"""
+    w_vol, w_lhb, w_sector, w_pattern, w_ma = 0.30, 0.20, 0.15, 0.10, 0.25
+    # 量比归一化 (0-1, 5x封顶)
+    s_vol = min(vol_ratio, 5.0) / 5.0
+    # LHB (0 or 1)
+    s_lhb = 1.0 if lhb_bonus else 0.0
+    # 板块共振 (0 or 1)
+    s_sector = 1.0 if sector_bonus else 0.0
+    # 形态
+    pat_map = {"limit_up":1.0,"big_bull":0.8,"bull":0.7,"small_bull":0.5,"hammer":0.4,"neutral":0.2}
+    s_pattern = pat_map.get(pattern, 0.2)
+    # MA偏离
+    if ma5_val > 0:
+        s_ma = min(max((close / ma5_val - 1) * 5, 0), 0.5)
+    else:
+        s_ma = 0
+    return round((w_vol*s_vol + w_lhb*s_lhb + w_sector*s_sector + w_pattern*s_pattern + w_ma*s_ma) * 100, 1)
+
+
 def section_stock_screening(date_str):
+    dt = datetime.strptime(date_str, "%Y%m%d")
+    lookback = (dt - timedelta(days=60)).strftime("%Y%m%d")
+
     print(f"\n  六、放量涨停选股")
     print(f"  {'─' * 60}")
+    print(f"  市场环境: {qs}/{qs_max}分 ({qs/max(qs_max,1)*100:.0f}%)")
     print(f"  策略1: 近{VOL_DAYS}日日环比放量>={VOL_RATIO}x + 至少1个涨停")
     print(f"  策略2: 近{VOL_DAYS}日持续放量>={VOL_RATIO}x(20日均线) + MA{MA_FAST}>MA{MA_SLOW}上升 + 至少1个涨停")
 
@@ -600,13 +660,15 @@ def section_stock_screening(date_str):
         pattern = detect_pattern(df)
         lhb_bonus = sym in lhb_codes and lhb_data.get(sym, 0) > 0
         pct = round(df.iloc[-1].get("pct_chg", 0) or 0, 2)
+        ma5 = df["close"].rolling(5).mean().iloc[-1]
+        comp = composite_score(vr_v1, sector_bonus, lhb_bonus, pattern, df.iloc[-1]["close"], ma5)
 
         if ok_v1:
             entry = {"symbol": sym, "name": name, "industry": industry,
                      "close": round(df.iloc[-1]["close"], 2),
                      "vol_ratio": round(vr_v1, 2), "pct_chg": pct,
                      "pattern": pattern, "sector_bonus": sector_bonus,
-                     "lhb_bonus": lhb_bonus}
+                     "lhb_bonus": lhb_bonus, "composite": comp}
             s1_results.append(entry)
 
         if ok_v2:
@@ -616,7 +678,7 @@ def section_stock_screening(date_str):
                                   "close": round(df.iloc[-1]["close"], 2),
                                   "vol_ratio": round(vr_v2, 2), "pct_chg": pct,
                                   "pattern": pattern, "sector_bonus": sector_bonus,
-                                  "lhb_bonus": lhb_bonus})
+                                  "lhb_bonus": lhb_bonus, "composite": comp})
 
     print(f"\n  板块共振行业: {sum(1 for v in INDUSTRY_CACHE.values() if v)}/{len(INDUSTRY_CACHE)}")
     print(f"  龙虎榜数据: {'有' if lhb is not None and len(lhb) > 0 else '无'}")
@@ -642,6 +704,15 @@ def section_stock_screening(date_str):
 
     print_section("策略1", s1_results, "strategy1")
     print_section("策略2", s2_results, "strategy2")
+    if s2_results:
+        s3 = sorted(s2_results, key=lambda x: x.get("composite", 0), reverse=True)
+        print(f"\n  [策略3] 综合合成排名 (因子加权得分)")
+        print(f"  {'代码':<8} {'名称':<8} {'综合分':>6} {'量比':>6} {'形态':<14} {'板块':>4} {'龙虎':>4}")
+        print(f"  {'─'*8} {'─'*8} {'─'*6} {'─'*6} {'─'*14} {'─'*4} {'─'*4}")
+        for r in s3[:5]:
+            sec = "+" if r.get("sector_bonus") else ""; lbh = "+" if r.get("lhb_bonus") else ""
+            print(f"  {r['symbol']:<8} {r['name']:<8} {r.get('composite',0):>6.1f} {r['vol_ratio']:>5.2f}x "
+                  f"{r['pattern']:<14} {sec:>4} {lbh:>4}")
 
     all_picks = s1_results + s2_results
     csv_path = os.path.join(OUT_DIR, f"daily_picks_{date_str}.csv")
@@ -909,7 +980,11 @@ def main():
     # 5
     zt_df = section_limit_up(date_str)
 
+    # 快速市场评分 (第六段选股前)
+    qs, qs_max = quick_market_score(net_flow, up_count, down_count, zt_df)
+
     # 6
+    picks = []
     if not args.no_screen:
         picks = section_stock_screening(date_str)
     else:
@@ -917,6 +992,13 @@ def main():
 
     # 7
     score, max_score = section_prediction(net_flow, up_count, down_count, zt_df, prev_net_flow, total_turnover, date_str)
+
+    # 市场环境过滤提示
+    score_pct = score / max(max_score, 1) * 100
+    if score_pct < 35 and picks:
+        print(f"\n  ⚠ 市场偏空(评分{score}/{max_score}={score_pct:.0f}%), 以上选股仅供观察, 不建议重仓操作")
+    elif score_pct < 50 and picks:
+        print(f"\n  ⚡ 市场偏弱(评分{score}/{max_score}={score_pct:.0f}%), 建议仓位控制在30%以内")
 
     elapsed = time.time() - t0
     print(f"\n{'=' * 72}")
