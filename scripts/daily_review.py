@@ -106,7 +106,7 @@ def quick_market_score(net_flow, up_count, down_count, zt_df):
     elif zc >= 40: score += 1
     # 连板高度 (0-2)
     if zt_df is not None and "连板数" in zt_df.columns:
-        mb = int(zt_df["连板数"].max())
+        mb = int(zt_df["连板数"].max()) if zt_df is not None and len(zt_df) > 0 and "连板数" in zt_df.columns else 0
         if mb >= 6: score += 2
         elif mb >= 4: score += 1
     # 指数 (0-2)
@@ -425,6 +425,8 @@ def section_limit_up(date_str):
     try:
         zt = ak.stock_zt_pool_em(date=date_str)
         print(f"  今日涨停: {len(zt)} 只")
+        if len(zt) == 0:
+            return None
     except Exception as e:
         print(f"  [!] 失败: {e}")
         return None
@@ -445,12 +447,13 @@ def section_limit_up(date_str):
             print("  今日无连板股")
 
     # 连板分布
-    bc = zt["连板数"].value_counts().sort_index(ascending=False)
-    parts = []
-    for b, cnt in bc.items():
-        bi = int(b)
-        parts.append(f"{bi}连板:{cnt}只" if bi >= 2 else f"首板:{cnt}只")
-    print(f"  分布: {' | '.join(parts)}")
+    if "连板数" in zt.columns:
+        bc = zt["连板数"].value_counts().sort_index(ascending=False)
+        parts = []
+        for b, cnt in bc.items():
+            bi = int(b)
+            parts.append(f"{bi}连板:{cnt}只" if bi >= 2 else f"首板:{cnt}只")
+        print(f"  分布: {' | '.join(parts)}")
 
     # 炸板
     try:
@@ -466,10 +469,11 @@ def section_limit_up(date_str):
 
     # 涨停行业分布
     if "所属行业" in zt.columns:
-        ic = zt["所属行业"].value_counts().head(6)
-        print(f"\n  涨停集中行业:")
-        for ind, cnt in ic.items():
-            print(f"    {ind}: {cnt}只")
+        if "所属行业" in zt.columns:
+            ic = zt["所属行业"].value_counts().head(6)
+            print(f"\n  涨停集中行业:")
+            for ind, cnt in ic.items():
+                print(f"    {ind}: {cnt}只")
 
     return zt
 
